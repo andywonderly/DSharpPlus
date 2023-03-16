@@ -494,37 +494,37 @@ namespace DSharpPlus.VoiceNext
             var opusSpan = opus.Span;
             try
             {
-                this.Sodium.Decrypt(encryptedOpus, opusSpan, nonce);
+                //this.Sodium.Decrypt(encryptedOpus, opusSpan, nonce);
 
-                // Strip extensions, if any
-                if (hasExtension)
-                {
-                    // RFC 5285, 4.2 One-Byte header
-                    // http://www.rfcreader.com/#rfc5285_line186
-                    if (opusSpan[0] == 0xBE && opusSpan[1] == 0xDE)
-                    {
-                        var headerLen = (opusSpan[2] << 8) | opusSpan[3];
-                        var i = 4;
-                        for (; i < headerLen + 4; i++)
-                        {
-                            var @byte = opusSpan[i];
+                //// Strip extensions, if any
+                //if (hasExtension)
+                //{
+                //    // RFC 5285, 4.2 One-Byte header
+                //    // http://www.rfcreader.com/#rfc5285_line186
+                //    if (opusSpan[0] == 0xBE && opusSpan[1] == 0xDE)
+                //    {
+                //        var headerLen = (opusSpan[2] << 8) | opusSpan[3];
+                //        var i = 4;
+                //        for (; i < headerLen + 4; i++)
+                //        {
+                //            var @byte = opusSpan[i];
 
-                            // ID is currently unused since we skip it anyway
-                            //var id = (byte)(@byte >> 4);
-                            var length = (byte)(@byte & 0x0F) + 1;
+                //            // ID is currently unused since we skip it anyway
+                //            //var id = (byte)(@byte >> 4);
+                //            var length = (byte)(@byte & 0x0F) + 1;
 
-                            i += length;
-                        }
+                //            i += length;
+                //        }
 
-                        // Strip extension padding too
-                        while (opusSpan[i] == 0)
-                            i++;
+                //        // Strip extension padding too
+                //        while (opusSpan[i] == 0)
+                //            i++;
 
-                        opusSpan = opusSpan.Slice(i);
-                    }
+                //        opusSpan = opusSpan.Slice(i);
+                //    }
 
-                    // TODO: consider implementing RFC 5285, 4.3. Two-Byte Header
-                }
+                //    // TODO: consider implementing RFC 5285, 4.3. Two-Byte Header
+                //}
 
                 if (opusSpan[0] == 0x90)
                 {
@@ -535,23 +535,18 @@ namespace DSharpPlus.VoiceNext
 
                 if (gap == 1)
                 {
-                    var lastSampleCount = this.Opus.GetLastPacketSampleCount(vtx.Decoder);
-                    var fecpcm = new byte[this.AudioFormat.SampleCountToSampleSize(lastSampleCount)];
-                    var fecpcmMem = fecpcm.AsSpan();
-                    this.Opus.Decode(vtx.Decoder, opusSpan, ref fecpcmMem, true, out _);
-                    pcmPackets.Add(fecpcm.AsMemory(0, fecpcmMem.Length));
+                    pcmPackets.Add(null);
                 }
                 else if (gap > 1)
                 {
                     var lastSampleCount = this.Opus.GetLastPacketSampleCount(vtx.Decoder);
                     for (var i = 0; i < gap; i++)
                     {
-                        var fecpcm = new byte[this.AudioFormat.SampleCountToSampleSize(lastSampleCount)];
-                        var fecpcmMem = fecpcm.AsSpan();
-                        this.Opus.ProcessPacketLoss(vtx.Decoder, lastSampleCount, ref fecpcmMem);
-                        pcmPackets.Add(fecpcm.AsMemory(0, fecpcmMem.Length));
+                        pcmPackets.Add(null);
                     }
                 }
+
+                pcmPackets.Add(null);
 
                 var pcmSpan = pcm.Span;
                 this.Opus.Decode(vtx.Decoder, opusSpan, ref pcmSpan, false, out outputFormat);
@@ -580,25 +575,25 @@ namespace DSharpPlus.VoiceNext
                 if (!this.ProcessPacket(data, ref opusMem, ref pcmMem, pcmFillers, out var vtx, out var audioFormat))
                     return;
 
-                foreach (var pcmFiller in pcmFillers)
-                    await this._voiceReceived.InvokeAsync(this, new VoiceReceiveEventArgs
-                    {
-                        SSRC = vtx.SSRC,
-                        User = vtx.User,
-                        PcmData = pcmFiller,
-                        OpusData = new byte[0].AsMemory(),
-                        AudioFormat = audioFormat,
-                        AudioDuration = audioFormat.CalculateSampleDuration(pcmFiller.Length)
-                    }).ConfigureAwait(false);
+                //foreach (var pcmFiller in pcmFillers)
+                //    await this._voiceReceived.InvokeAsync(this, new VoiceReceiveEventArgs
+                //    {
+                //        SSRC = vtx.SSRC,
+                //        User = vtx.User,
+                //        PcmData = pcmFiller,
+                //        OpusData = new byte[0].AsMemory(),
+                //        AudioFormat = audioFormat,
+                //        AudioDuration = audioFormat.CalculateSampleDuration(pcmFiller.Length)
+                //    }).ConfigureAwait(false);
 
                 await this._voiceReceived.InvokeAsync(this, new VoiceReceiveEventArgs
                 {
                     SSRC = vtx.SSRC,
                     User = vtx.User,
-                    PcmData = pcmMem,
-                    OpusData = opusMem,
+                    PcmData = null,
+                    OpusData = null,
                     AudioFormat = audioFormat,
-                    AudioDuration = audioFormat.CalculateSampleDuration(pcmMem.Length)
+                    AudioDuration = 0
                 }).ConfigureAwait(false);
             }
             catch (Exception ex)
