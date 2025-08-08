@@ -1,89 +1,94 @@
-// This file is part of the DSharpPlus project.
-//
-// Copyright (c) 2015 Mike Santiago
-// Copyright (c) 2016-2023 DSharpPlus Contributors
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
 using System.Collections.Generic;
+using DSharpPlus.Entities;
 using Newtonsoft.Json;
 
-namespace DSharpPlus.Net.Abstractions
+namespace DSharpPlus.Net.Abstractions;
+
+internal sealed class TransportApplication
 {
-    internal sealed class TransportApplication
-    {
-        [JsonProperty("id", NullValueHandling = NullValueHandling.Include)]
-        public ulong Id { get; set; }
+    [JsonProperty("id", NullValueHandling = NullValueHandling.Include)]
+    public ulong Id { get; set; }
 
-        [JsonProperty("name", NullValueHandling = NullValueHandling.Include)]
-        public string Name { get; set; }
+    [JsonProperty("name", NullValueHandling = NullValueHandling.Include)]
+    public string Name { get; set; }
 
-        [JsonProperty("icon", NullValueHandling = NullValueHandling.Include)]
-        public string IconHash { get; set; }
+    [JsonProperty("icon", NullValueHandling = NullValueHandling.Include)]
+    public string IconHash { get; set; }
 
-        [JsonProperty("description", NullValueHandling = NullValueHandling.Include)]
-        public string Description { get; set; }
+    [JsonProperty("description", NullValueHandling = NullValueHandling.Include)]
+    public string Description { get; set; }
+    
+    [JsonProperty("rpc_origins", NullValueHandling = NullValueHandling.Ignore)]
+    public IList<string>? RpcOrigins { get; set; }
 
-        [JsonProperty("summary", NullValueHandling = NullValueHandling.Include)]
-        public string Summary { get; set; }
+    [JsonProperty("bot_public", NullValueHandling = NullValueHandling.Include)]
+    public bool IsPublicBot { get; set; }
 
-        [JsonProperty("bot_public", NullValueHandling = NullValueHandling.Include)]
-        public bool IsPublicBot { get; set; }
+    [JsonProperty("bot_require_code_grant", NullValueHandling = NullValueHandling.Include)]
+    public bool BotRequiresCodeGrant { get; set; }
+    
+    [JsonProperty("bot")]
+    public TransportUser? Bot { get; set; }
 
-        [JsonProperty("bot_require_code_grant", NullValueHandling = NullValueHandling.Include)]
-        public bool BotRequiresCodeGrant { get; set; }
+    [JsonProperty("terms_of_service_url", NullValueHandling = NullValueHandling.Ignore)]
+    public string? TermsOfServiceUrl { get; set; }
 
-        [JsonProperty("terms_of_service_url", NullValueHandling = NullValueHandling.Ignore)]
-        public string TermsOfServiceUrl { get; set; }
+    [JsonProperty("privacy_policy_url", NullValueHandling = NullValueHandling.Ignore)]
+    public string? PrivacyPolicyUrl { get; set; }
 
-        [JsonProperty("privacy_policy_url", NullValueHandling = NullValueHandling.Ignore)]
-        public string PrivacyPolicyUrl { get; set; }
+    [JsonProperty("owner", NullValueHandling = NullValueHandling.Include)]
+    public TransportUser? Owner { get; set; }
+    
+    [JsonProperty("verify_key", NullValueHandling = NullValueHandling.Include)]
+    public string VerifyKey { get; set; }
 
-        // Json.NET can figure the type out
-        [JsonProperty("rpc_origins", NullValueHandling = NullValueHandling.Ignore)]
-        public IList<string> RpcOrigins { get; set; }
+    [JsonProperty("team", NullValueHandling = NullValueHandling.Include)]
+    public TransportTeam? Team { get; set; }
+    
+    [JsonProperty("guild_id")]
+    public ulong? GuildId { get; set; }
+    
+    [JsonProperty("guild")]
+    public DiscordGuild? Guild { get; set; }
 
-        [JsonProperty("owner", NullValueHandling = NullValueHandling.Include)]
-        public TransportUser Owner { get; set; }
+    [JsonProperty("primary_sku_id")]
+    public ulong PrimarySkuId { get; set; }
+    
+    [JsonProperty("slug")]
+    public string Slug { get; set; }
+    
+    [JsonProperty("cover_image")]
+    public string CoverImageHash { get; set; }
+    
+    [JsonProperty("flags", NullValueHandling = NullValueHandling.Ignore)]
+    public DiscordApplicationFlags? Flags { get; set; }
+    
+    [JsonProperty("approximate_guild_count")]
+    public int? ApproximateGuildCount { get; set; }
 
-        [JsonProperty("team", NullValueHandling = NullValueHandling.Include)]
-        public TransportTeam Team { get; set; }
+    [JsonProperty("approximate_user_install_count")]
+    public int? ApproximateUserInstallCount { get; set; }
 
-        [JsonProperty("flags", NullValueHandling = NullValueHandling.Ignore)]
-        public ApplicationFlags? Flags { get; set; }
+    [JsonProperty("redirect_uris")]
+    public string[] RedirectUris { get; set; }
+    
+    [JsonProperty("interactions_endpoint_url")]
+    public string? InteractionEndpointUrl { get; set; }
+    
+    [JsonProperty("role_connections_verification_url")]
+    public string? RoleConnectionsVerificationUrl { get; set; }
+    
+    [JsonProperty("tags")]
+    public string[]? Tags { get; set; }
+    
+    [JsonProperty("install_params")]
+    public DiscordApplicationOAuth2InstallParams InstallParams { get; set; }
+    
+    [JsonProperty("integration_types_config")]
+    public Dictionary<DiscordApplicationIntegrationType, DiscordApplicationIntegrationTypeConfiguration> IntegrationTypeConfigurations { get; set; }
 
-        // These are dispatch (store) properties - can't imagine them being needed in bots
-        //[JsonProperty("verify_key", NullValueHandling = NullValueHandling.Include)]
-        //public string VerifyKey { get; set; }
-
-        //[JsonProperty("guild_id")]
-        //public Optional<ulong> GuildId { get; set; }
-
-        //[JsonProperty("primary_sku_id")]
-        //public Optional<ulong> PrimarySkuId { get; set; }
-
-        //[JsonProperty("slug")] // sluggg :DDDDDD
-        //public Optional<string> SkuSlug { get; set; }
-
-        //[JsonProperty("cover_image")]
-        //public Optional<string> CoverImageHash { get; set; }
-
-        internal TransportApplication() { }
-    }
+    [JsonProperty("custom_install_url")]
+    public string CustomInstallUrl { get; set; }
+    
+    internal TransportApplication() { }
 }

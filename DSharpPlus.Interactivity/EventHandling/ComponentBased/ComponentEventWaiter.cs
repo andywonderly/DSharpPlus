@@ -1,141 +1,160 @@
-// This file is part of the DSharpPlus project.
-//
-// Copyright (c) 2015 Mike Santiago
-// Copyright (c) 2016-2023 DSharpPlus Contributors
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Globalization;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using ConcurrentCollections;
 using DSharpPlus.Entities;
 using DSharpPlus.EventArgs;
 using DSharpPlus.Interactivity.Enums;
-using Emzi0767.Utilities;
 using Microsoft.Extensions.Logging;
 
-namespace DSharpPlus.Interactivity.EventHandling
+namespace DSharpPlus.Interactivity.EventHandling;
+
+/// <summary>
+/// A component-based version of <see cref="EventWaiter{T}"/>
+/// </summary>
+internal class ComponentEventWaiter : IDisposable
 {
-    /// <summary>
-    /// A component-based version of <see cref="EventWaiter{T}"/>
-    /// </summary>
-    internal class ComponentEventWaiter : IDisposable
+    private readonly DiscordClient client;
+    private readonly ConcurrentHashSet<ComponentMatchRequest> matchRequests = [];
+    private readonly ConcurrentHashSet<ComponentCollectRequest> collectRequests = [];
+
+    private readonly InteractivityConfiguration config;
+
+    public ComponentEventWaiter(DiscordClient client, InteractivityConfiguration config)
     {
-        private readonly DiscordClient _client;
-        private readonly ConcurrentHashSet<ComponentMatchRequest> _matchRequests = new();
-        private readonly ConcurrentHashSet<ComponentCollectRequest> _collectRequests = new();
+        this.client = client;
+        this.config = config;
+    }
 
-        private readonly DiscordFollowupMessageBuilder _message;
-        private readonly InteractivityConfiguration _config;
+    /// <summary>
+    /// Waits for a specified <see cref="ComponentMatchRequest"/>'s predicate to be fulfilled.
+    /// </summary>
+    /// <param name="request">The request to wait for.</param>
+    /// <returns>The returned args, or null if it timed out.</returns>
+    public async Task<ComponentInteractionCreatedEventArgs> WaitForMatchAsync(ComponentMatchRequest request)
+    {
+        this.matchRequests.Add(request);
 
-        public ComponentEventWaiter(DiscordClient client, InteractivityConfiguration config)
+        try
         {
-            this._client = client;
-            this._client.ComponentInteractionCreated += this.Handle;
-            this._config = config;
+            return await request.Tcs.Task;
+        }
+        catch (Exception e)
+        {
+            this.client.Logger.LogError(InteractivityEvents.InteractivityWaitError, e, "An exception was thrown while waiting for components.");
+            return null;
+        }
+        finally
+        {
+            this.matchRequests.TryRemove(request);
+        }
+    }
 
-            this._message = new() {Content = config.ResponseMessage ?? "This message was not meant for you.", IsEphemeral = true};
+    /// <summary>
+    /// Collects reactions and returns the result when the <see cref="ComponentMatchRequest"/>'s cancellation token is canceled.
+    /// </summary>
+    /// <param name="request">The request to wait on.</param>
+    /// <returns>The result from request's predicate over the period of time leading up to the token's cancellation.</returns>
+    public async Task<IReadOnlyList<ComponentInteractionCreatedEventArgs>> CollectMatchesAsync(ComponentCollectRequest request)
+    {
+        this.collectRequests.Add(request);
+        try
+        {
+            await request.Tcs.Task;
+        }
+        catch (Exception e)
+        {
+            this.client.Logger.LogError(InteractivityEvents.InteractivityCollectorError, e, "There was an error while collecting component event args.");
+        }
+        finally
+        {
+            this.collectRequests.TryRemove(request);
         }
 
-        /// <summary>
-        /// Waits for a specified <see cref="ComponentMatchRequest"/>'s predicate to be fulfilled.
-        /// </summary>
-        /// <param name="request">The request to wait for.</param>
-        /// <returns>The returned args, or null if it timed out.</returns>
-        public async Task<ComponentInteractionCreateEventArgs> WaitForMatchAsync(ComponentMatchRequest request)
+        return request.Collected.ToArray();
+    }
+
+    internal async Task HandleAsync(DiscordClient _, ComponentInteractionCreatedEventArgs args)
+    {
+        foreach (ComponentMatchRequest? mreq in this.matchRequests.ToArray())
         {
-            this._matchRequests.Add(request);
-
-            try
+            if (mreq.Message == args.Message && mreq.IsMatch(args))
             {
-                return await request.Tcs.Task.ConfigureAwait(false);
+                mreq.Tcs.TrySetResult(args);
             }
-            catch (Exception e)
+            else if (this.config.ResponseBehavior is InteractionResponseBehavior.Respond)
             {
-                this._client.Logger.LogError(InteractivityEvents.InteractivityWaitError, e, "An exception was thrown while waiting for components.");
-                return null;
-            }
-            finally
-            {
-                this._matchRequests.TryRemove(request);
-            }
-        }
-
-        /// <summary>
-        /// Collects reactions and returns the result when the <see cref="ComponentMatchRequest"/>'s cancellation token is canceled.
-        /// </summary>
-        /// <param name="request">The request to wait on.</param>
-        /// <returns>The result from request's predicate over the period of time leading up to the token's cancellation.</returns>
-        public async Task<IReadOnlyList<ComponentInteractionCreateEventArgs>> CollectMatchesAsync(ComponentCollectRequest request)
-        {
-            this._collectRequests.Add(request);
-            try
-            {
-                await request.Tcs.Task.ConfigureAwait(false);
-            }
-            catch (Exception e)
-            {
-                this._client.Logger.LogError(InteractivityEvents.InteractivityCollectorError, e, "There was an error while collecting component event args.");
-            }
-            finally
-            {
-                this._collectRequests.TryRemove(request);
-            }
-            return request.Collected.ToArray();
-        }
-
-        private async Task Handle(DiscordClient _, ComponentInteractionCreateEventArgs args)
-        {
-            foreach (var mreq in this._matchRequests.ToArray())
-            {
-                if (mreq.Message == args.Message && mreq.IsMatch(args))
-                    mreq.Tcs.TrySetResult(args);
-
-                else if (this._config.ResponseBehavior is InteractionResponseBehavior.Respond)
-                    await args.Interaction.CreateFollowupMessageAsync(this._message).ConfigureAwait(false);
-            }
-
-
-            foreach (var creq in this._collectRequests.ToArray())
-            {
-                if (creq.Message == args.Message && creq.IsMatch(args))
+                try
                 {
-                    await args.Interaction.CreateResponseAsync(InteractionResponseType.DeferredMessageUpdate).ConfigureAwait(false);
+                    string responseMessage = this.config.ResponseMessage ?? this.config.ResponseMessageFactory(args, this.client.ServiceProvider);
 
-                    if (creq.IsMatch(args))
-                        creq.Collected.Add(args);
-
-                    else if (this._config.ResponseBehavior is InteractionResponseBehavior.Respond)
-                        await args.Interaction.CreateFollowupMessageAsync(this._message).ConfigureAwait(false);
+                    if (args.Interaction.ResponseState is DiscordInteractionResponseState.Unacknowledged)
+                    {
+                        await args.Interaction.CreateResponseAsync
+                        (
+                            DiscordInteractionResponseType.ChannelMessageWithSource,
+                            new() { Content = responseMessage, IsEphemeral = true }
+                        );
+                    }
+                    else if (args.Interaction.ResponseState is DiscordInteractionResponseState.Deferred)
+                    {
+                        await args.Interaction.CreateFollowupMessageAsync
+                        (
+                            new() { Content = responseMessage, IsEphemeral = true }
+                        );
+                    }
+                }
+                catch (Exception e) 
+                {
+                    this.client.Logger.LogWarning(e, "An exception was thrown during an interactivity response.");
                 }
             }
         }
-        public void Dispose()
+
+        foreach (ComponentCollectRequest? creq in this.collectRequests.ToArray())
         {
-            this._matchRequests.Clear();
-            this._collectRequests.Clear();
-            this._client.ComponentInteractionCreated -= this.Handle;
+            if (creq.Message == args.Message && creq.IsMatch(args))
+            {
+                await args.Interaction.CreateResponseAsync(DiscordInteractionResponseType.DeferredMessageUpdate);
+
+                if (creq.IsMatch(args))
+                {
+                    creq.Collected.Add(args);
+                }
+                else if (this.config.ResponseBehavior is InteractionResponseBehavior.Respond)
+                {
+                    try
+                    {
+                        string responseMessage = this.config.ResponseMessage ?? this.config.ResponseMessageFactory(args, this.client.ServiceProvider);
+
+                        if (args.Interaction.ResponseState is DiscordInteractionResponseState.Unacknowledged)
+                        {
+                            await args.Interaction.CreateResponseAsync
+                            (
+                                DiscordInteractionResponseType.ChannelMessageWithSource,
+                                new() { Content = responseMessage, IsEphemeral = true }
+                            );
+                        }
+                        else if (args.Interaction.ResponseState is DiscordInteractionResponseState.Deferred)
+                        {
+                            await args.Interaction.CreateFollowupMessageAsync
+                            (
+                                new() { Content = responseMessage, IsEphemeral = true }
+                            );
+                        }
+                    }
+                    catch (Exception e) 
+                    {
+                        this.client.Logger.LogWarning(e, "An exception was thrown during an interactivity response.");
+                    }
+                }
+            }
         }
+    }
+    public void Dispose()
+    {
+        this.matchRequests.Clear();
+        this.collectRequests.Clear();
     }
 }

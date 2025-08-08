@@ -4,12 +4,15 @@ title: Your First Bot
 ---
 
 # Your First Bot
+>
 >[!NOTE]
 > This article assumes the following:
+>
 > * You have [created a bot account][0] and have a bot token.
 > * You have [Visual Studio][1] installed on your computer.
 
 ## Create a Project
+
 Open up Visual Studio and click on `Create a new project` towards the bottom right.
 
 ![Visual Studio Start Screen][2]
@@ -30,6 +33,7 @@ Voilà! Your project has been created!
 ![Visual Studio IDE][5]
 
 ## Install Package
+
 Now that you have a project created, you'll want to get DSharpPlus installed.
 Locate the *solution explorer* on the right side, then right click on `Dependencies` and select `Manage NuGet Packages`
 from the context menu.
@@ -42,17 +46,18 @@ Select the `Browse` tab towards the top left, then type `DSharpPlus` into the se
 
 ![NuGet Package Search][7]
 
-The first results should be the six DSharpPlus packages.
+The first results should be the eight DSharpPlus packages.
 
 ![Search Results][8]
 
 Package                    | Description
 :-------------------------:|:---:
 `DSharpPlus`               | Main package; Discord API client.
-`DSharpPlus.CommandsNext`  | Add-on which provides a command framework.
-`DSharpPlus.SlashCommands` | Add-on which provides an application command framework.
+`DSharpPlus.Commands`      | Add-on which provides a command framework for both messages and application commands.
+`DSharpPlus.CommandsNext`  | Add-on which provides a command framework. Scheduled for obsoletion.
+`DSharpPlus.SlashCommands` | Add-on which provides an application command framework. Obsolete.
 `DSharpPlus.Interactivity` | Add-on which allows for interactive commands.
-`DSharpPlus.Lavalink`      | Client implementation for [Lavalink][9]. Useful for music bots.
+`DSharpPlus.Lavalink`      | Client implementation for [Lavalink][9]. Defunct.
 `DSharpPlus.VoiceNext`     | Add-on which enables connectivity to Discord voice channels.
 `DSharpPlus.Rest`          | REST-only Discord client.
 
@@ -64,6 +69,7 @@ then click the `Install` button to the right (after verifing that you will be in
 You're now ready to write some code!
 
 ## First Lines of Code
+
 DSharpPlus implements the [Task-based Asynchronous Pattern][11]. Because of this, the majority of DSharpPlus methods must be
 executed in a method marked as `async` so they can be properly `await`ed.
 
@@ -97,13 +103,10 @@ and populate the @DSharpPlus.DiscordConfiguration.Token property with your bot t
 @DSharpPlus.DiscordConfiguration.TokenType property to @DSharpPlus.TokenType.Bot. Next add the
 @DSharpPlus.DiscordClient.Intents property and populate it with @DSharpPlus.DiscordIntents.AllUnprivileged.
 These Intents are required for certain events to be fired. Please visit this [article][14] for more information.
+
 ```cs
-var discord = new DiscordClient(new DiscordConfiguration()
-{
-    Token = "My First Token",
-    TokenType = TokenType.Bot,
-    Intents = DiscordIntents.AllUnprivileged
-});
+DiscordClientBuilder builder = DiscordClientBuilder.CreateDefault("My First Token", DiscordIntents.AllUnprivileged);
+DiscordClient client = builder.Build();
 ```
 
 >[!WARNING]
@@ -115,10 +118,11 @@ var discord = new DiscordClient(new DiscordConfiguration()
 
 Follow that up with @DSharpPlus.DiscordClient.ConnectAsync* to connect and login to Discord, and `await Task.Delay(-1);`
 at the end of the method to prevent the console window from closing prematurely.
-```cs
-var discord = new DiscordClient();
 
-await discord.ConnectAsync();
+```cs
+DiscordClient client = builder.Build();
+
+await client.ConnectAsync();
 await Task.Delay(-1);
 ```
 
@@ -131,48 +135,51 @@ single log message from DSharpPlus. Woo hoo!
 ![Program Console][15]
 
 ## Spicing Up Your Bot
+
 Right now our bot doesn't do a whole lot. Let's bring it to life by having it respond to a message!
 
 As of September 1st 2022, Discord started requiring message content intent for bots that want to read message content. This is a privileged intent!
 
-If your bot has under 100 guilds, all you have to do is flip the switch in the developer dashboard. (over at https://discord.com/developers/applications)
+If your bot has under 100 guilds, all you have to do is flip the switch in the developer dashboard. (over at <https://discord.com/developers/applications>)
 If your bot has over 100 guilds, you'll need approval from Discord's end.
 
-After enabling the intent in the developer dashboard, you have to specify your intents in you DiscordConfiguration:
+After enabling the intent in the developer dashboard, you have to specify your intents to the client:
 
 ```cs
-var discord = new DiscordClient(new DiscordConfiguration()
-{
-    Token = "My First Token",
-    TokenType = TokenType.Bot,
-    Intents = DiscordIntents.AllUnprivileged | DiscordIntents.MessageContents
-});
+DiscordClientBuilder builder = DiscordClientBuilder.CreateDefault("My First Token", DiscordIntents.AllUnprivileged | DiscordIntents.MessageContent);
 ```
 
 Now you can start to listen to messages.
 
-Hook the @DSharpPlus.DiscordClient.MessageCreated event fired by @DSharpPlus.DiscordClient with a [lambda][18]. Mark it
-as `async` and give it two parameters: `s` and `e`.
-```cs
-discord.MessageCreated += async (s, e) =>
-{
+Register an event handler as follows:
 
-};
+```cs
+builder.ConfigureEventHandlers
+(
+    b => b.HandleMessageCreated(async s, e) => {})
+);
 ```
 
 Then, add an `if` statement into the body of your event lambda that will check if
 @DSharpPlus.Entities.DiscordMessage.Content starts with your desired trigger word and respond with a message using
 @DSharpPlus.Entities.DiscordMessage.RespondAsync* if it does. For this example, we'll have the bot to respond with
-*pong!* for each message that starts with *ping*.
+*pong!*for each message that starts with*ping*.
+
 ```cs
-discord.MessageCreated += async (s, e) =>
-{
-    if (e.Message.Content.ToLower().StartsWith("ping"))
-		await e.Message.RespondAsync("pong!");
-};
+builder.ConfigureEventHandlers
+(
+    b => b.HandleMessageCreated(async (s, e) => 
+    {
+        if (e.Message.Content.ToLower().StartsWith("ping"))
+        {
+            await e.Message.RespondAsync("pong!");
+        }
+    })
+);
 ```
 
 ## The Finished Product
+
 Your entire program should now look like this:
 
 ```cs
@@ -186,20 +193,20 @@ namespace MyFirstBot
     {
         static async Task Main(string[] args)
         {
-            var discord = new DiscordClient(new DiscordConfiguration()
-            {
-                Token = "My First Token",
-                TokenType = TokenType.Bot,
-                Intents = DiscordIntents.AllUnprivileged | DiscordIntents.MessageContents
-            });
+            DiscordClientBuilder builder = DiscordClientBuilder.CreateDefault("My First Token", DiscordIntents.AllUnprivileged | DiscordIntents.MessageContents);
 
-            discord.MessageCreated += async (s, e) =>
-            {
-                if (e.Message.Content.ToLower().StartsWith("ping"))
-                    await e.Message.RespondAsync("pong!");
-            };
+            builder.ConfigureEventHandlers
+            (
+                b => b.HandleMessageCreated(async (s, e) => 
+                {
+                    if (e.Message.Content.ToLower().StartsWith("ping"))
+                    {
+                        await e.Message.RespondAsync("pong!");
+                    }
+                })
+            );
 
-            await discord.ConnectAsync();
+            await builder.ConnectAsync();
             await Task.Delay(-1);
         }
     }
@@ -214,29 +221,29 @@ Congrats, your bot now does something!
 ![Bot Response][17]
 
 ## Further Reading
+
 Now that you have a basic bot up and running, you should take a look at the following:
 
 * [Events][18]
 * [CommandsNext][19]
 
 <!-- LINKS -->
-[0]:  xref:articles.basics.bot_account "Creating a Bot Account"
-[1]:  https://visualstudio.microsoft.com/vs/
-[2]:  ../../images/basics_first_bot_01.png
-[3]:  ../../images/basics_first_bot_02.png
-[4]:  ../../images/basics_first_bot_03.png
-[5]:  ../../images/basics_first_bot_04.png
-[6]:  ../../images/basics_first_bot_05.png
-[7]:  ../../images/basics_first_bot_06.png
-[8]:  ../../images/basics_first_bot_07.png
-[9]:  xref:articles.audio.lavalink.setup
+[0]: xref:articles.basics.bot_account "Creating a Bot Account"
+[1]: https://visualstudio.microsoft.com/vs/
+[2]: ../../images/basics_first_bot_01.png
+[3]: ../../images/basics_first_bot_02.png
+[4]: ../../images/basics_first_bot_03.png
+[5]: ../../images/basics_first_bot_04.png
+[6]: ../../images/basics_first_bot_05.png
+[7]: ../../images/basics_first_bot_06.png
+[8]: ../../images/basics_first_bot_07.png
+[9]: xref:articles.audio.lavalink.setup
 [10]: ../../images/basics_first_bot_08.png
 [11]: https://docs.microsoft.com/en-us/dotnet/standard/asynchronous-programming-patterns/consuming-the-task-based-asynchronous-pattern
 [12]: ../../images/basics_first_bot_10.png
 [13]: ../../images/basics_first_bot_11.png
 [14]: xref:articles.beyond_basics.intents
 [15]: ../../images/basics_first_bot_12.png
-[16]: https://docs.microsoft.com/en-us/dotnet/csharp/language-reference/operators/lambda-expressions
 [17]: ../../images/basics_first_bot_13.png
 [18]: xref:articles.beyond_basics.events
-[19]: xref:articles.commands.intro
+[19]: xref:articles.commands_next.intro

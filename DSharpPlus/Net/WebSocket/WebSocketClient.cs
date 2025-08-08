@@ -1,26 +1,3 @@
-// This file is part of the DSharpPlus project.
-//
-// Copyright (c) 2015 Mike Santiago
-// Copyright (c) 2016-2023 DSharpPlus Contributors
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -29,330 +6,367 @@ using System.Net;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
+
+using DSharpPlus.AsyncEvents;
 using DSharpPlus.EventArgs;
-using Emzi0767.Utilities;
 
-namespace DSharpPlus.Net.WebSocket
+namespace DSharpPlus.Net.WebSocket;
+
+// weebsocket
+// not even sure whether emzi or I posted this. much love, naam.
+/// <summary>
+/// The default, native-based WebSocket client implementation.
+/// </summary>
+public class WebSocketClient : IWebSocketClient
 {
-    // weebsocket
-    // not even sure whether emzi or I posted this. much love, naam.
+    private const int OutgoingChunkSize = 8192; // 8 KiB
+    private const int IncomingChunkSize = 32768; // 32 KiB
+
+    /// <inheritdoc />
+    public IWebProxy Proxy { get; }
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, string> DefaultHeaders { get; }
+
+    /// <inheritdoc />
+    public bool IsConnected
+        => this.isConnected;
+
+    private readonly Dictionary<string, string> defaultHeaders;
+
+    private Task receiverTask;
+    private CancellationTokenSource receiverTokenSource;
+    private CancellationToken receiverToken;
+    private readonly SemaphoreSlim senderLock;
+
+    private CancellationTokenSource socketTokenSource;
+    private CancellationToken socketToken;
+    private ClientWebSocket ws;
+
+    private volatile bool isClientClose = false;
+    private volatile bool isConnected = false;
+    private bool isDisposed = false;
+
     /// <summary>
-    /// The default, native-based WebSocket client implementation.
+    /// Instantiates a new WebSocket client.
     /// </summary>
-    public class WebSocketClient : IWebSocketClient
+    public WebSocketClient(IClientErrorHandler handler)
     {
-        private const int OutgoingChunkSize = 8192; // 8 KiB
-        private const int IncomingChunkSize = 32768; // 32 KiB
+        this.connected = new(handler);
+        this.disconnected = new(handler);
+        this.messageReceived = new(handler);
+        this.exceptionThrown = new(handler);
 
-        /// <inheritdoc />
-        public IWebProxy Proxy { get; }
+        this.defaultHeaders = [];
+        this.DefaultHeaders = new ReadOnlyDictionary<string, string>(this.defaultHeaders);
 
-        /// <inheritdoc />
-        public IReadOnlyDictionary<string, string> DefaultHeaders { get; }
-        private readonly Dictionary<string, string> _defaultHeaders;
+        this.receiverTokenSource = null;
+        this.receiverToken = CancellationToken.None;
+        this.senderLock = new SemaphoreSlim(1);
 
-        private Task _receiverTask;
-        private CancellationTokenSource _receiverTokenSource;
-        private CancellationToken _receiverToken;
-        private readonly SemaphoreSlim _senderLock;
+        this.socketTokenSource = null;
+        this.socketToken = CancellationToken.None;
+    }
 
-        private CancellationTokenSource _socketTokenSource;
-        private CancellationToken _socketToken;
-        private ClientWebSocket _ws;
-
-        private volatile bool _isClientClose = false;
-        private volatile bool _isConnected = false;
-        private bool _isDisposed = false;
-
-        /// <summary>
-        /// Instantiates a new WebSocket client with specified proxy settings.
-        /// </summary>
-        /// <param name="proxy">Proxy settings for the client.</param>
-        private WebSocketClient(IWebProxy proxy)
+    /// <inheritdoc />
+    public async Task ConnectAsync(Uri uri)
+    {
+        // Disconnect first
+        try
         {
-            this._connected = new AsyncEvent<WebSocketClient, SocketEventArgs>("WS_CONNECT", TimeSpan.Zero, this.EventErrorHandler);
-            this._disconnected = new AsyncEvent<WebSocketClient, SocketCloseEventArgs>("WS_DISCONNECT", TimeSpan.Zero, this.EventErrorHandler);
-            this._messageReceived = new AsyncEvent<WebSocketClient, SocketMessageEventArgs>("WS_MESSAGE", TimeSpan.Zero, this.EventErrorHandler);
-            this._exceptionThrown = new AsyncEvent<WebSocketClient, SocketErrorEventArgs>("WS_ERROR", TimeSpan.Zero, null);
-
-            this.Proxy = proxy;
-            this._defaultHeaders = new Dictionary<string, string>();
-            this.DefaultHeaders = new ReadOnlyDictionary<string, string>(this._defaultHeaders);
-
-            this._receiverTokenSource = null;
-            this._receiverToken = CancellationToken.None;
-            this._senderLock = new SemaphoreSlim(1);
-
-            this._socketTokenSource = null;
-            this._socketToken = CancellationToken.None;
+            await DisconnectAsync();
         }
+        catch { }
 
-        /// <inheritdoc />
-        public async Task ConnectAsync(Uri uri)
+        // Disallow sending messages
+        await this.senderLock.WaitAsync();
+
+        try
         {
-            // Disconnect first
-            try { await this.DisconnectAsync().ConfigureAwait(false); } catch { }
+            // This can be null at this point
+            this.receiverTokenSource?.Dispose();
+            this.socketTokenSource?.Dispose();
 
-            // Disallow sending messages
-            await this._senderLock.WaitAsync().ConfigureAwait(false);
-
-            try
+            this.ws?.Dispose();
+            this.ws = new ClientWebSocket();
+            this.ws.Options.Proxy = this.Proxy;
+            this.ws.Options.KeepAliveInterval = TimeSpan.Zero;
+            if (this.defaultHeaders != null)
             {
-                // This can be null at this point
-                this._receiverTokenSource?.Dispose();
-                this._socketTokenSource?.Dispose();
-
-                this._ws?.Dispose();
-                this._ws = new ClientWebSocket();
-                this._ws.Options.Proxy = this.Proxy;
-                this._ws.Options.KeepAliveInterval = TimeSpan.Zero;
-                if (this._defaultHeaders != null)
-                    foreach (var (k, v) in this._defaultHeaders)
-                        this._ws.Options.SetRequestHeader(k, v);
-
-                this._receiverTokenSource = new CancellationTokenSource();
-                this._receiverToken = this._receiverTokenSource.Token;
-
-                this._socketTokenSource = new CancellationTokenSource();
-                this._socketToken = this._socketTokenSource.Token;
-
-                this._isClientClose = false;
-                this._isDisposed = false;
-                await this._ws.ConnectAsync(uri, this._socketToken).ConfigureAwait(false);
-                this._receiverTask = Task.Run(this.ReceiverLoopAsync, this._receiverToken);
-            }
-            finally
-            {
-                this._senderLock.Release();
-            }
-        }
-
-        /// <inheritdoc />
-        public async Task DisconnectAsync(int code = 1000, string message = "")
-        {
-            // Ensure that messages cannot be sent
-            await this._senderLock.WaitAsync().ConfigureAwait(false);
-
-            try
-            {
-                this._isClientClose = true;
-                if (this._ws != null && (this._ws.State == WebSocketState.Open || this._ws.State == WebSocketState.CloseReceived))
-                    await this._ws.CloseOutputAsync((WebSocketCloseStatus)code, message, CancellationToken.None).ConfigureAwait(false);
-
-                if (this._receiverTask != null)
-                    await this._receiverTask.ConfigureAwait(false); // Ensure that receiving completed
-
-                if (this._isConnected)
-                    this._isConnected = false;
-
-                if (!this._isDisposed)
+                foreach ((string k, string v) in this.defaultHeaders)
                 {
-                    // Cancel all running tasks
-                    if (this._socketToken.CanBeCanceled)
-                        this._socketTokenSource?.Cancel();
-                    this._socketTokenSource?.Dispose();
-
-                    if (this._receiverToken.CanBeCanceled)
-                        this._receiverTokenSource?.Cancel();
-                    this._receiverTokenSource?.Dispose();
-
-                    this._isDisposed = true;
+                    this.ws.Options.SetRequestHeader(k, v);
                 }
             }
-            catch { }
-            finally
-            {
-                this._senderLock.Release();
-            }
+
+            this.receiverTokenSource = new CancellationTokenSource();
+            this.receiverToken = this.receiverTokenSource.Token;
+
+            this.socketTokenSource = new CancellationTokenSource();
+            this.socketToken = this.socketTokenSource.Token;
+
+            this.isClientClose = false;
+            this.isDisposed = false;
+            await this.ws.ConnectAsync(uri, this.socketToken);
+            this.receiverTask = Task.Run(ReceiverLoopAsync, this.receiverToken);
         }
-
-        /// <inheritdoc />
-        public async Task SendMessageAsync(string message)
+        finally
         {
-            if (this._ws == null)
-                return;
+            this.senderLock.Release();
+        }
+    }
 
-            if (this._ws.State != WebSocketState.Open && this._ws.State != WebSocketState.CloseReceived)
-                return;
+    /// <inheritdoc />
+    public async Task DisconnectAsync(int code = 1000, string message = "")
+    {
+        // Ensure that messages cannot be sent
+        await this.senderLock.WaitAsync();
 
-            var bytes = Utilities.UTF8.GetBytes(message);
-            await this._senderLock.WaitAsync().ConfigureAwait(false);
-            try
+        try
+        {
+            this.isClientClose = true;
+            if (this.ws != null && (this.ws.State == WebSocketState.Open || this.ws.State == WebSocketState.CloseReceived))
             {
-                var len = bytes.Length;
-                var segCount = len / OutgoingChunkSize;
-                if (len % OutgoingChunkSize != 0)
-                    segCount++;
+                await this.ws.CloseOutputAsync((WebSocketCloseStatus)code, message, CancellationToken.None);
+            }
 
-                for (var i = 0; i < segCount; i++)
+            if (this.receiverTask != null)
+            {
+                await this.receiverTask; // Ensure that receiving completed
+            }
+
+            if (this.isConnected)
+            {
+                this.isConnected = false;
+            }
+
+            if (!this.isDisposed)
+            {
+                // Cancel all running tasks
+                if (this.socketToken.CanBeCanceled)
                 {
-                    var segStart = OutgoingChunkSize * i;
-                    var segLen = Math.Min(OutgoingChunkSize, len - segStart);
-
-                    await this._ws.SendAsync(new ArraySegment<byte>(bytes, segStart, segLen), WebSocketMessageType.Text, i == segCount - 1, CancellationToken.None).ConfigureAwait(false);
+                    this.socketTokenSource?.Cancel();
                 }
-            }
-            finally
-            {
-                this._senderLock.Release();
-            }
-        }
 
-        /// <inheritdoc />
-        public bool AddDefaultHeader(string name, string value)
-        {
-            this._defaultHeaders[name] = value;
-            return true;
-        }
+                this.socketTokenSource?.Dispose();
 
-        /// <inheritdoc />
-        public bool RemoveDefaultHeader(string name)
-            => this._defaultHeaders.Remove(name);
-
-        /// <summary>
-        /// Disposes of resources used by this WebSocket client instance.
-        /// </summary>
-        public void Dispose()
-        {
-            if (this._isDisposed)
-                return;
-
-            this._isDisposed = true;
-
-            this.DisconnectAsync().ConfigureAwait(false).GetAwaiter().GetResult();
-
-            this._receiverTokenSource?.Dispose();
-            this._socketTokenSource?.Dispose();
-        }
-
-        internal async Task ReceiverLoopAsync()
-        {
-            await Task.Yield();
-
-            var token = this._receiverToken;
-            var buffer = new ArraySegment<byte>(new byte[IncomingChunkSize]);
-
-            try
-            {
-                using var bs = new MemoryStream();
-                while (!token.IsCancellationRequested)
+                if (this.receiverToken.CanBeCanceled)
                 {
-                    // See https://github.com/RogueException/Discord.Net/commit/ac389f5f6823e3a720aedd81b7805adbdd78b66d
-                    // for explanation on the cancellation token
+                    this.receiverTokenSource?.Cancel();
+                }
 
-                    WebSocketReceiveResult result;
-                    byte[] resultBytes;
-                    do
+                this.receiverTokenSource?.Dispose();
+
+                this.isDisposed = true;
+            }
+        }
+        catch { }
+        finally
+        {
+            this.senderLock.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task SendMessageAsync(string message)
+    {
+        if (this.ws == null)
+        {
+            return;
+        }
+
+        if (this.ws.State is not WebSocketState.Open and not WebSocketState.CloseReceived)
+        {
+            return;
+        }
+
+        byte[] bytes = Utilities.UTF8.GetBytes(message);
+        await this.senderLock.WaitAsync();
+        try
+        {
+            int len = bytes.Length;
+            int segCount = len / OutgoingChunkSize;
+            if (len % OutgoingChunkSize != 0)
+            {
+                segCount++;
+            }
+
+            for (int i = 0; i < segCount; i++)
+            {
+                int segStart = OutgoingChunkSize * i;
+                int segLen = Math.Min(OutgoingChunkSize, len - segStart);
+
+                await this.ws.SendAsync(new ArraySegment<byte>(bytes, segStart, segLen), WebSocketMessageType.Text, i == segCount - 1, CancellationToken.None);
+            }
+        }
+        finally
+        {
+            this.senderLock.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public bool AddDefaultHeader(string name, string value)
+    {
+        this.defaultHeaders[name] = value;
+        return true;
+    }
+
+    /// <inheritdoc />
+    public bool RemoveDefaultHeader(string name)
+        => this.defaultHeaders.Remove(name);
+
+    /// <summary>
+    /// Disposes of resources used by this WebSocket client instance.
+    /// </summary>
+    //public void Dispose()
+    //{
+    //
+    //}
+
+    internal async Task ReceiverLoopAsync()
+    {
+        await Task.Yield();
+
+        CancellationToken token = this.receiverToken;
+        ArraySegment<byte> buffer = new(new byte[IncomingChunkSize]);
+
+        try
+        {
+            using MemoryStream bs = new();
+            while (!token.IsCancellationRequested)
+            {
+                // See https://github.com/RogueException/Discord.Net/commit/ac389f5f6823e3a720aedd81b7805adbdd78b66d
+                // for explanation on the cancellation token
+
+                WebSocketReceiveResult result;
+                byte[] resultBytes;
+                do
+                {
+                    result = await this.ws.ReceiveAsync(buffer, CancellationToken.None);
+
+                    if (result.MessageType == WebSocketMessageType.Close)
                     {
-                        result = await this._ws.ReceiveAsync(buffer, CancellationToken.None).ConfigureAwait(false);
-
-                        if (result.MessageType == WebSocketMessageType.Close)
-                            break;
-
-                        bs.Write(buffer.Array, 0, result.Count);
-                    }
-                    while (!result.EndOfMessage);
-
-                    resultBytes = new byte[bs.Length];
-                    bs.Position = 0;
-                    bs.Read(resultBytes, 0, resultBytes.Length);
-                    bs.Position = 0;
-                    bs.SetLength(0);
-
-                    if (!this._isConnected && result.MessageType != WebSocketMessageType.Close)
-                    {
-                        this._isConnected = true;
-                        await this._connected.InvokeAsync(this, new SocketEventArgs()).ConfigureAwait(false);
-                    }
-
-                    if (result.MessageType == WebSocketMessageType.Binary)
-                    {
-                        await this._messageReceived.InvokeAsync(this, new SocketBinaryMessageEventArgs(resultBytes)).ConfigureAwait(false);
-                    }
-                    else if (result.MessageType == WebSocketMessageType.Text)
-                    {
-                        await this._messageReceived.InvokeAsync(this, new SocketTextMessageEventArgs(Utilities.UTF8.GetString(resultBytes))).ConfigureAwait(false);
-                    }
-                    else // close
-                    {
-                        if (!this._isClientClose)
-                        {
-                            var code = result.CloseStatus.Value;
-                            code = code == WebSocketCloseStatus.NormalClosure || code == WebSocketCloseStatus.EndpointUnavailable
-                                ? (WebSocketCloseStatus)4000
-                                : code;
-
-                            await this._ws.CloseOutputAsync(code, result.CloseStatusDescription, CancellationToken.None).ConfigureAwait(false);
-                        }
-
-                        await this._disconnected.InvokeAsync(this, new SocketCloseEventArgs() { CloseCode = (int)result.CloseStatus, CloseMessage = result.CloseStatusDescription }).ConfigureAwait(false);
                         break;
                     }
+
+                    bs.Write(buffer.Array, 0, result.Count);
+                }
+                while (!result.EndOfMessage);
+
+                resultBytes = new byte[bs.Length];
+                bs.Position = 0;
+                bs.Read(resultBytes, 0, resultBytes.Length);
+                bs.Position = 0;
+                bs.SetLength(0);
+
+                if (!this.isConnected && result.MessageType != WebSocketMessageType.Close)
+                {
+                    this.isConnected = true;
+                    await this.connected.InvokeAsync(this, new SocketOpenedEventArgs());
+                }
+
+                if (result.MessageType == WebSocketMessageType.Binary)
+                {
+                    await this.messageReceived.InvokeAsync(this, new SocketBinaryMessageEventArgs(resultBytes));
+                }
+                else if (result.MessageType == WebSocketMessageType.Text)
+                {
+                    await this.messageReceived.InvokeAsync(this, new SocketTextMessageEventArgs(Utilities.UTF8.GetString(resultBytes)));
+                }
+                else // close
+                {
+                    if (!this.isClientClose)
+                    {
+                        WebSocketCloseStatus code = result.CloseStatus.Value;
+                        code = code is WebSocketCloseStatus.NormalClosure or WebSocketCloseStatus.EndpointUnavailable
+                            ? (WebSocketCloseStatus)4000
+                            : code;
+
+                        await this.ws.CloseOutputAsync(code, result.CloseStatusDescription, CancellationToken.None);
+                    }
+
+                    await this.disconnected.InvokeAsync(this, new SocketClosedEventArgs() { CloseCode = (int)result.CloseStatus, CloseMessage = result.CloseStatusDescription });
+                    break;
                 }
             }
-            catch (Exception ex)
+        }
+        catch (Exception ex)
+        {
+            await this.exceptionThrown.InvokeAsync(this, new SocketErrorEventArgs() { Exception = ex });
+            await this.disconnected.InvokeAsync(this, new SocketClosedEventArgs() { CloseCode = -1, CloseMessage = "" });
+        }
+
+        // Don't await or you deadlock
+        // DisconnectAsync waits for this method
+        _ = DisconnectAsync();
+    }
+
+    #region Events
+    /// <summary>
+    /// Triggered when the client connects successfully.
+    /// </summary>
+    public event AsyncEventHandler<IWebSocketClient, SocketOpenedEventArgs> Connected
+    {
+        add => this.connected.Register(value);
+        remove => this.connected.Unregister(value);
+    }
+    private readonly AsyncEvent<WebSocketClient, SocketOpenedEventArgs> connected;
+
+    /// <summary>
+    /// Triggered when the client is disconnected.
+    /// </summary>
+    public event AsyncEventHandler<IWebSocketClient, SocketClosedEventArgs> Disconnected
+    {
+        add => this.disconnected.Register(value);
+        remove => this.disconnected.Unregister(value);
+    }
+    private readonly AsyncEvent<WebSocketClient, SocketClosedEventArgs> disconnected;
+
+    /// <summary>
+    /// Triggered when the client receives a message from the remote party.
+    /// </summary>
+    public event AsyncEventHandler<IWebSocketClient, SocketMessageEventArgs> MessageReceived
+    {
+        add => this.messageReceived.Register(value);
+        remove => this.messageReceived.Unregister(value);
+    }
+    private readonly AsyncEvent<WebSocketClient, SocketMessageEventArgs> messageReceived;
+
+    /// <summary>
+    /// Triggered when an error occurs in the client.
+    /// </summary>
+    public event AsyncEventHandler<IWebSocketClient, SocketErrorEventArgs> ExceptionThrown
+    {
+        add => this.exceptionThrown.Register(value);
+        remove => this.exceptionThrown.Unregister(value);
+    }
+    private readonly AsyncEvent<WebSocketClient, SocketErrorEventArgs> exceptionThrown;
+
+    private void EventErrorHandler<TArgs>(AsyncEvent<WebSocketClient, TArgs> asyncEvent, Exception ex, AsyncEventHandler<WebSocketClient, TArgs> handler, WebSocketClient sender, TArgs eventArgs)
+        where TArgs : AsyncEventArgs
+        => this.exceptionThrown.InvokeAsync(this, new SocketErrorEventArgs() { Exception = ex }).GetAwaiter().GetResult();
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (!this.isDisposed)
+        {
+            if (disposing)
             {
-                await this._exceptionThrown.InvokeAsync(this, new SocketErrorEventArgs() { Exception = ex }).ConfigureAwait(false);
-                await this._disconnected.InvokeAsync(this, new SocketCloseEventArgs() { CloseCode = -1, CloseMessage = "" }).ConfigureAwait(false);
+                DisconnectAsync().GetAwaiter().GetResult();
+                this.receiverTokenSource?.Dispose();
+                this.socketTokenSource?.Dispose();
             }
 
-            // Don't await or you deadlock
-            // DisconnectAsync waits for this method
-            _ = this.DisconnectAsync().ConfigureAwait(false);
+            this.isDisposed = true;
         }
-
-        /// <summary>
-        /// Creates a new instance of <see cref="WebSocketClient"/>.
-        /// </summary>
-        /// <param name="proxy">Proxy to use for this client instance.</param>
-        /// <returns>An instance of <see cref="WebSocketClient"/>.</returns>
-        public static IWebSocketClient CreateNew(IWebProxy proxy)
-            => new WebSocketClient(proxy);
-
-        #region Events
-        /// <summary>
-        /// Triggered when the client connects successfully.
-        /// </summary>
-        public event AsyncEventHandler<IWebSocketClient, SocketEventArgs> Connected
-        {
-            add => this._connected.Register(value);
-            remove => this._connected.Unregister(value);
-        }
-        private readonly AsyncEvent<WebSocketClient, SocketEventArgs> _connected;
-
-        /// <summary>
-        /// Triggered when the client is disconnected.
-        /// </summary>
-        public event AsyncEventHandler<IWebSocketClient, SocketCloseEventArgs> Disconnected
-        {
-            add => this._disconnected.Register(value);
-            remove => this._disconnected.Unregister(value);
-        }
-        private readonly AsyncEvent<WebSocketClient, SocketCloseEventArgs> _disconnected;
-
-        /// <summary>
-        /// Triggered when the client receives a message from the remote party.
-        /// </summary>
-        public event AsyncEventHandler<IWebSocketClient, SocketMessageEventArgs> MessageReceived
-        {
-            add => this._messageReceived.Register(value);
-            remove => this._messageReceived.Unregister(value);
-        }
-        private readonly AsyncEvent<WebSocketClient, SocketMessageEventArgs> _messageReceived;
-
-        /// <summary>
-        /// Triggered when an error occurs in the client.
-        /// </summary>
-        public event AsyncEventHandler<IWebSocketClient, SocketErrorEventArgs> ExceptionThrown
-        {
-            add => this._exceptionThrown.Register(value);
-            remove => this._exceptionThrown.Unregister(value);
-        }
-        private readonly AsyncEvent<WebSocketClient, SocketErrorEventArgs> _exceptionThrown;
-
-        private void EventErrorHandler<TArgs>(AsyncEvent<WebSocketClient, TArgs> asyncEvent, Exception ex, AsyncEventHandler<WebSocketClient, TArgs> handler, WebSocketClient sender, TArgs eventArgs)
-            where TArgs : AsyncEventArgs
-            => this._exceptionThrown.InvokeAsync(this, new SocketErrorEventArgs() { Exception = ex }).ConfigureAwait(false).GetAwaiter().GetResult();
-        #endregion
     }
+
+    public void Dispose()
+    {
+        // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
+    }
+    #endregion
 }

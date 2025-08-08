@@ -1,113 +1,94 @@
-// This file is part of the DSharpPlus project.
-//
-// Copyright (c) 2015 Mike Santiago
-// Copyright (c) 2016-2023 DSharpPlus Contributors
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
 using System;
+using System.Threading;
 using Microsoft.Extensions.Logging;
 
-namespace DSharpPlus
+namespace DSharpPlus.Logging;
+
+/// <summary>
+/// The DSharpPlus default logger.
+/// </summary>
+internal sealed class DefaultLogger : ILogger
 {
-    public class DefaultLogger : ILogger<BaseDiscordClient>
+    private readonly string name;
+    private readonly LogLevel minimumLogLevel;
+    private readonly Lock @lock = new();
+    private readonly string timestampFormat;
+
+    public DefaultLogger(string name, LogLevel minimumLogLevel, string timestampFormat)
     {
-        private static readonly object _lock = new();
+        this.name = name;
+        this.minimumLogLevel = minimumLogLevel;
+        this.timestampFormat = timestampFormat;
+    }
 
-        private LogLevel MinimumLevel { get; }
-        private string TimestampFormat { get; }
+    public IDisposable? BeginScope<TState>(TState state)
+        where TState : notnull
+        => default;
 
-        internal DefaultLogger(BaseDiscordClient client)
-            : this(client.Configuration.MinimumLogLevel, client.Configuration.LogTimestampFormat)
-        { }
+    public bool IsEnabled(LogLevel logLevel)
+        => logLevel >= this.minimumLogLevel && logLevel != LogLevel.None;
 
-        internal DefaultLogger(LogLevel minLevel = LogLevel.Information, string timestampFormat = "yyyy-MM-dd HH:mm:ss zzz")
+    public void Log<TState>
+    (
+        LogLevel logLevel,
+        EventId eventId,
+        TState state,
+        Exception? exception,
+        Func<TState, Exception?, string> formatter
+    )
+    {
+        if (!IsEnabled(logLevel))
         {
-            this.MinimumLevel = minLevel;
-            this.TimestampFormat = timestampFormat;
+            return;
         }
 
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
+        if (this.name.StartsWith("System.Net.Http"))
         {
-            if (!this.IsEnabled(logLevel))
-                return;
+            return;
+        }
 
-            lock (_lock)
+        lock (this.@lock)
+        {
+            if (logLevel == LogLevel.Trace)
             {
-                var ename = eventId.Name;
-                ename = ename?.Length > 12 ? ename?.Substring(0, 12) : ename;
-                Console.Write($"[{DateTimeOffset.Now.ToString(this.TimestampFormat)}] [{eventId.Id,-4}/{ename,-12}] ");
+                Console.ForegroundColor = ConsoleColor.Gray;
+            }
 
-                switch (logLevel)
-                {
-                    case LogLevel.Trace:
-                        Console.ForegroundColor = ConsoleColor.Gray;
-                        break;
+            Console.Write($"[{DateTimeOffset.UtcNow.ToString(this.timestampFormat)}] [{this.name}] ");
 
-                    case LogLevel.Debug:
-                        Console.ForegroundColor = ConsoleColor.DarkMagenta;
-                        break;
+            Console.ForegroundColor = logLevel switch
+            {
+                LogLevel.Trace => ConsoleColor.Gray,
+                LogLevel.Debug => ConsoleColor.Green,
+                LogLevel.Information => ConsoleColor.Magenta,
+                LogLevel.Warning => ConsoleColor.Yellow,
+                LogLevel.Error => ConsoleColor.Red,
+                LogLevel.Critical => ConsoleColor.DarkRed,
+                _ => throw new ArgumentException("Invalid log level specified.", nameof(logLevel))
+            };
 
-                    case LogLevel.Information:
-                        Console.ForegroundColor = ConsoleColor.DarkCyan;
-                        break;
-
-                    case LogLevel.Warning:
-                        Console.ForegroundColor = ConsoleColor.Yellow;
-                        break;
-
-                    case LogLevel.Error:
-                        Console.ForegroundColor = ConsoleColor.Red;
-                        break;
-
-                    case LogLevel.Critical:
-                        Console.BackgroundColor = ConsoleColor.Red;
-                        Console.ForegroundColor = ConsoleColor.Black;
-                        break;
-                }
-                Console.Write(logLevel switch
+            Console.Write
+            (
+                logLevel switch
                 {
                     LogLevel.Trace => "[Trace] ",
                     LogLevel.Debug => "[Debug] ",
-                    LogLevel.Information => "[Info ] ",
-                    LogLevel.Warning => "[Warn ] ",
+                    LogLevel.Information => "[Info]  ",
+                    LogLevel.Warning => "[Warn]  ",
                     LogLevel.Error => "[Error] ",
-                    LogLevel.Critical => "[Crit ]",
-                    LogLevel.None => "[None ] ",
-                    _ => "[?????] "
-                });
-                Console.ResetColor();
+                    LogLevel.Critical => "[Crit]  ",
+                    _ => "This code path is unreachable."
+                }
+            );
 
-                //The foreground color is off.
-                if (logLevel == LogLevel.Critical)
-                    Console.Write(" ");
+            Console.ResetColor();
 
-                var message = formatter(state, exception);
-                Console.WriteLine(message);
-                if (exception != null)
-                    Console.WriteLine(exception);
+            Console.WriteLine(formatter(state, exception));
+
+            if (exception != null)
+            {
+                Console.WriteLine($"{exception} : {exception.Message}\n{exception.StackTrace}");
             }
         }
-
-        public bool IsEnabled(LogLevel logLevel)
-            => logLevel >= this.MinimumLevel;
-
-        public IDisposable BeginScope<TState>(TState state) => throw new NotImplementedException();
     }
 }

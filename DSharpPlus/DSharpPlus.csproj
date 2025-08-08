@@ -1,33 +1,29 @@
-<?xml version="1.0" encoding="utf-8"?>
-<Project Sdk="Microsoft.NET.Sdk">
-
-  <Import Project="../DSharpPlus.targets" />
-
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <AssemblyName>DSharpPlus</AssemblyName>
-    <RootNamespace>DSharpPlus</RootNamespace>
-    <OutputType>Library</OutputType>
-    <TargetFrameworks>netstandard2.0</TargetFrameworks>
-  </PropertyGroup>
-
-  <PropertyGroup>
+    <PackageId>DSharpPlus</PackageId>
     <Description>A C# API for Discord based off DiscordSharp, but rewritten to fit the API standards.</Description>
-    <PackageTags>discord, discord-api, bots, discord-bots, chat, dsharp, dsharpplus, csharp, dotnet, vb-net, fsharp, webhooks</PackageTags>
+    <PackageTags>$(PackageTags), webhooks</PackageTags>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsPackable>true</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>Preview</LangVersion>
   </PropertyGroup>
-
   <ItemGroup>
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
-    <PackageReference Include="System.Memory" Version="4.5.4" />
-    <PackageReference Include="System.Net.Http" Version="4.3.4" />
-    <PackageReference Include="System.Net.WebSockets" Version="4.3.0" />
-    <PackageReference Include="System.Net.WebSockets.Client" Version="4.3.2" />
-    <PackageReference Include="System.Runtime.InteropServices.RuntimeInformation" Version="4.3.0" />
-    <PackageReference Include="System.Threading.Channels" Version="5.0.0" />
+    <PackageReference Include="CommunityToolkit.HighPerformance"/>
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory"/>
+    <PackageReference Include="Microsoft.Extensions.Http"/>
+    <PackageReference Include="Microsoft.Extensions.Logging"/>
+    <PackageReference Include="NetEscapades.EnumGenerators"/>
+    <PackageReference Include="Newtonsoft.Json"/>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"/>
+    <PackageReference Include="Polly.Core"/>
+    <PackageReference Include="Ulid"/>
   </ItemGroup>
-
-  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
-    <PackageReference Include="Emzi0767.Common" Version="2.6.2" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="5.0.0" />
+  <ItemGroup>
+    <None Remove="..\DSharpPlus.Analyzers\DSharpPlus.Analyzers\bin\Release\netstandard2.0\DSharpPlus.Analyzers.dll"/>
+    <None Include="..\DSharpPlus.Analyzers\DSharpPlus.Analyzers\bin\Release\netstandard2.0\DSharpPlus.Analyzers.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false"/>
   </ItemGroup>
-
+  <ItemGroup>
+    <ProjectReference Include="..\DSharpPlus.Analyzers\DSharpPlus.Analyzers\DSharpPlus.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
+  </ItemGroup>
 </Project>

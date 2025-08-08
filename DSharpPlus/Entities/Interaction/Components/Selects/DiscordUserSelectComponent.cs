@@ -1,71 +1,104 @@
-// This file is part of the DSharpPlus project.
-//
-// Copyright (c) 2015 Mike Santiago
-// Copyright (c) 2016-2023 DSharpPlus Contributors
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-namespace DSharpPlus.Entities
+using System.Collections.Generic;
+using Newtonsoft.Json;
+
+namespace DSharpPlus.Entities;
+
+/// <summary>
+/// A select component that allows users to be selected.
+/// </summary>
+public sealed class DiscordUserSelectComponent : BaseDiscordSelectComponent
 {
+    [JsonProperty("default_values", NullValueHandling = NullValueHandling.Ignore)]
+    private readonly List<DiscordSelectDefaultValue> defaultValues = [];
+
     /// <summary>
-    /// A select component that allows users to be selected.
+    /// The default values for this component.
     /// </summary>
-    public sealed class DiscordUserSelectComponent : BaseDiscordSelectComponent
+    [JsonIgnore]
+    public IReadOnlyList<DiscordSelectDefaultValue> DefaultValues => this.defaultValues;
+
+    /// <summary>
+    /// Adds a default user to this component.
+    /// </summary>
+    /// <param name="value">User to add</param>
+    public DiscordUserSelectComponent AddDefaultUser(DiscordUser value)
     {
-        /// <summary>
-        /// Enables this component.
-        /// </summary>
-        /// <returns>The current component.</returns>
-        public DiscordUserSelectComponent Enable()
-        {
-            this.Disabled = false;
-            return this;
-        }
-
-        /// <summary>
-        /// Disables this component.
-        /// </summary>
-        /// <returns>The current component.</returns>
-        public DiscordUserSelectComponent Disable()
-        {
-            this.Disabled = true;
-            return this;
-        }
-
-        internal DiscordUserSelectComponent()
-        {
-            this.Type = ComponentType.UserSelect;
-        }
-        /// <summary>
-        /// Creates a new user select component.
-        /// </summary>
-        /// <param name="customId">The ID of this component.</param>
-        /// <param name="placeholder">Placeholder text that's shown when no options are selected.</param>
-        /// <param name="disabled">Whether this component is disabled.</param>
-        /// <param name="minOptions">The minimum amount of options to be selected.</param>
-        /// <param name="maxOptions">The maximum amount of options to be selected, up to 25.</param>
-        public DiscordUserSelectComponent(string customId, string placeholder, bool disabled = false, int minOptions = 1, int maxOptions = 1) : this()
-        {
-            this.CustomId = customId;
-            this.Placeholder = placeholder;
-            this.Disabled = disabled;
-            this.MinimumSelectedValues = minOptions;
-            this.MaximumSelectedValues = maxOptions;
-        }
+        DiscordSelectDefaultValue defaultValue = new(value.Id, DiscordSelectDefaultValueType.User);
+        this.defaultValues.Add(defaultValue);
+        return this;
     }
+
+    /// <summary>
+    /// Collections of DiscordUser to add as default values.
+    /// </summary>
+    /// <param name="values">Collection of DiscordUser</param>
+    public DiscordUserSelectComponent AddDefaultUsers(IEnumerable<DiscordUser> values)
+    {
+        foreach (DiscordUser value in values)
+        {
+            DiscordSelectDefaultValue defaultValue = new(value.Id, DiscordSelectDefaultValueType.User);
+            this.defaultValues.Add(defaultValue);
+        }
+
+        return this;
+    }
+
+    /// <summary>
+    /// Adds a default user to this component.
+    /// </summary>
+    /// <param name="value">Id of a DiscordUser</param>
+    public DiscordUserSelectComponent AddDefaultUser(ulong value)
+    {
+        DiscordSelectDefaultValue defaultValue = new(value, DiscordSelectDefaultValueType.User);
+        this.defaultValues.Add(defaultValue);
+        return this;
+    }
+
+    /// <summary>
+    /// Collections of user ids to add as default values.
+    /// </summary>
+    /// <param name="values">Collection of DiscordUser ids</param>
+    public DiscordUserSelectComponent AddDefaultUsers(IEnumerable<ulong> values)
+    {
+        foreach (ulong value in values)
+        {
+            DiscordSelectDefaultValue defaultValue = new(value, DiscordSelectDefaultValueType.User);
+            this.defaultValues.Add(defaultValue);
+        }
+
+        return this;
+    }
+
+    /// <summary>
+    /// Enables this component.
+    /// </summary>
+    /// <returns>The current component.</returns>
+    public DiscordUserSelectComponent Enable()
+    {
+        this.Disabled = false;
+        return this;
+    }
+
+    /// <summary>
+    /// Disables this component.
+    /// </summary>
+    /// <returns>The current component.</returns>
+    public DiscordUserSelectComponent Disable()
+    {
+        this.Disabled = true;
+        return this;
+    }
+
+    internal DiscordUserSelectComponent() => this.Type = DiscordComponentType.UserSelect;
+
+    /// <summary>
+    /// Creates a new user select component.
+    /// </summary>
+    /// <param name="customId">The ID of this component.</param>
+    /// <param name="placeholder">Placeholder text that's shown when no options are selected.</param>
+    /// <param name="disabled">Whether this component is disabled.</param>
+    /// <param name="minOptions">The minimum amount of options to be selected.</param>
+    /// <param name="maxOptions">The maximum amount of options to be selected, up to 25.</param>
+    public DiscordUserSelectComponent(string customId, string placeholder, bool disabled = false, int minOptions = 1, int maxOptions = 1)
+    : base(DiscordComponentType.UserSelect, customId, placeholder, disabled, minOptions, maxOptions) { }
 }

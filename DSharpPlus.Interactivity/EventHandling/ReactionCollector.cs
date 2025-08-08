@@ -1,239 +1,201 @@
-// This file is part of the DSharpPlus project.
-//
-// Copyright (c) 2015 Mike Santiago
-// Copyright (c) 2016-2023 DSharpPlus Contributors
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+
 using ConcurrentCollections;
+
+using DSharpPlus.AsyncEvents;
 using DSharpPlus.Entities;
 using DSharpPlus.EventArgs;
-using Emzi0767.Utilities;
+
 using Microsoft.Extensions.Logging;
 
-namespace DSharpPlus.Interactivity.EventHandling
+namespace DSharpPlus.Interactivity.EventHandling;
+
+// nice documentation lmfao
+/// <summary>
+/// Eventwaiter is a class that serves as a layer between the InteractivityExtension
+/// and the DiscordClient to listen to an event and check for matches to a predicate.
+/// </summary>
+internal class ReactionCollector : IDisposable
 {
+    private DiscordClient client;
+    private AsyncEvent<DiscordClient, MessageReactionAddedEventArgs> reactionAddEvent;
+    private AsyncEventHandler<DiscordClient, MessageReactionAddedEventArgs> reactionAddHandler;
+    private AsyncEvent<DiscordClient, MessageReactionRemovedEventArgs> reactionRemoveEvent;
+    private AsyncEventHandler<DiscordClient, MessageReactionRemovedEventArgs> reactionRemoveHandler;
+    private AsyncEvent<DiscordClient, MessageReactionsClearedEventArgs> reactionClearEvent;
+    private AsyncEventHandler<DiscordClient, MessageReactionsClearedEventArgs> reactionClearHandler;
+    private ConcurrentHashSet<ReactionCollectRequest> requests;
+
     /// <summary>
-    /// Eventwaiter is a class that serves as a layer between the InteractivityExtension
-    /// and the DiscordClient to listen to an event and check for matches to a predicate.
+    /// Creates a new Eventwaiter object.
     /// </summary>
-    internal class ReactionCollector : IDisposable
+    /// <param name="extension">Your DiscordClient</param>
+    public ReactionCollector(InteractivityExtension extension)
     {
-        DiscordClient _client;
+        this.requests = [];
+        this.client = extension.Client;
 
-        AsyncEvent<DiscordClient, MessageReactionAddEventArgs> _reactionAddEvent;
-        AsyncEventHandler<DiscordClient, MessageReactionAddEventArgs> _reactionAddHandler;
+        this.reactionAddEvent = (AsyncEvent<DiscordClient, MessageReactionAddedEventArgs>)extension.eventDistributor.GetOrAdd
+        (
+            typeof(MessageReactionAddedEventArgs),
+            new AsyncEvent<DiscordClient, MessageReactionAddedEventArgs>(extension.errorHandler)
+        );
 
-        AsyncEvent<DiscordClient, MessageReactionRemoveEventArgs> _reactionRemoveEvent;
-        AsyncEventHandler<DiscordClient, MessageReactionRemoveEventArgs> _reactionRemoveHandler;
+        this.reactionRemoveEvent = (AsyncEvent<DiscordClient, MessageReactionRemovedEventArgs>)extension.eventDistributor.GetOrAdd
+        (
+            typeof(MessageReactionRemovedEventArgs),
+            new AsyncEvent<DiscordClient, MessageReactionRemovedEventArgs>(extension.errorHandler)
+        );
 
-        AsyncEvent<DiscordClient, MessageReactionsClearEventArgs> _reactionClearEvent;
-        AsyncEventHandler<DiscordClient, MessageReactionsClearEventArgs> _reactionClearHandler;
+        this.reactionClearEvent = (AsyncEvent<DiscordClient, MessageReactionsClearedEventArgs>)extension.eventDistributor.GetOrAdd
+        (
+            typeof(MessageReactionsClearedEventArgs),
+            new AsyncEvent<DiscordClient, MessageReactionsClearedEventArgs>(extension.errorHandler)
+        );
 
-        ConcurrentHashSet<ReactionCollectRequest> _requests;
+        // Registering handlers
+        this.reactionAddHandler = new AsyncEventHandler<DiscordClient, MessageReactionAddedEventArgs>(HandleReactionAdd);
+        this.reactionAddEvent.Register(this.reactionAddHandler);
 
-        /// <summary>
-        /// Creates a new Eventwaiter object.
-        /// </summary>
-        /// <param name="client">Your DiscordClient</param>
-        public ReactionCollector(DiscordClient client)
+        this.reactionRemoveHandler = new AsyncEventHandler<DiscordClient, MessageReactionRemovedEventArgs>(HandleReactionRemove);
+        this.reactionRemoveEvent.Register(this.reactionRemoveHandler);
+
+        this.reactionClearHandler = new AsyncEventHandler<DiscordClient, MessageReactionsClearedEventArgs>(HandleReactionClear);
+        this.reactionClearEvent.Register(this.reactionClearHandler);
+    }
+
+    public async Task<ReadOnlyCollection<Reaction>> CollectAsync(ReactionCollectRequest request)
+    {
+        this.requests.Add(request);
+        ReadOnlyCollection<Reaction>? result;
+
+        try
         {
-            this._client = client;
-            var tinfo = this._client.GetType().GetTypeInfo();
-
-            this._requests = new ConcurrentHashSet<ReactionCollectRequest>();
-
-            // Grabbing all three events from client
-            var handler = tinfo.DeclaredFields.First(x => x.FieldType == typeof(AsyncEvent<DiscordClient, MessageReactionAddEventArgs>));
-
-            this._reactionAddEvent = (AsyncEvent<DiscordClient, MessageReactionAddEventArgs>)handler.GetValue(this._client);
-            this._reactionAddHandler = new AsyncEventHandler<DiscordClient, MessageReactionAddEventArgs>(this.HandleReactionAdd);
-            this._reactionAddEvent.Register(this._reactionAddHandler);
-
-            handler = tinfo.DeclaredFields.First(x => x.FieldType == typeof(AsyncEvent<DiscordClient, MessageReactionRemoveEventArgs>));
-
-            this._reactionRemoveEvent = (AsyncEvent<DiscordClient, MessageReactionRemoveEventArgs>)handler.GetValue(this._client);
-            this._reactionRemoveHandler = new AsyncEventHandler<DiscordClient, MessageReactionRemoveEventArgs>(this.HandleReactionRemove);
-            this._reactionRemoveEvent.Register(this._reactionRemoveHandler);
-
-            handler = tinfo.DeclaredFields.First(x => x.FieldType == typeof(AsyncEvent<DiscordClient, MessageReactionsClearEventArgs>));
-
-            this._reactionClearEvent = (AsyncEvent<DiscordClient, MessageReactionsClearEventArgs>)handler.GetValue(this._client);
-            this._reactionClearHandler = new AsyncEventHandler<DiscordClient, MessageReactionsClearEventArgs>(this.HandleReactionClear);
-            this._reactionClearEvent.Register(this._reactionClearHandler);
+            await request.tcs.Task;
         }
-
-        public async Task<ReadOnlyCollection<Reaction>> CollectAsync(ReactionCollectRequest request)
+        catch (Exception ex)
         {
-            this._requests.Add(request);
-            var result = (ReadOnlyCollection<Reaction>)null;
-
-            try
-            {
-                await request._tcs.Task.ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                this._client.Logger.LogError(InteractivityEvents.InteractivityCollectorError, ex, "Exception occurred while collecting reactions");
-            }
-            finally
-            {
-                result = new ReadOnlyCollection<Reaction>(new HashSet<Reaction>(request._collected).ToList());
-                request.Dispose();
-                this._requests.TryRemove(request);
-            }
-            return result;
+            this.client.Logger.LogError(InteractivityEvents.InteractivityCollectorError, ex, "Exception occurred while collecting reactions");
         }
-
-        private Task HandleReactionAdd(DiscordClient client, MessageReactionAddEventArgs eventargs)
+        finally
         {
-            // foreach request add
-            foreach (var req in this._requests)
+            result = new ReadOnlyCollection<Reaction>(new HashSet<Reaction>(request.collected).ToList());
+            request.Dispose();
+            this.requests.TryRemove(request);
+        }
+        return result;
+    }
+
+    private Task HandleReactionAdd(DiscordClient client, MessageReactionAddedEventArgs eventargs)
+    {
+        // foreach request add
+        foreach (ReactionCollectRequest req in this.requests)
+        {
+            if (req.message.Id == eventargs.Message.Id)
             {
-                if (req._message.Id == eventargs.Message.Id)
+                if (req.collected.Any(x => x.Emoji == eventargs.Emoji && x.Users.Any(y => y.Id != eventargs.User.Id)))
                 {
-                    if (req._collected.Any(x => x.Emoji == eventargs.Emoji && x.Users.Any(y => y.Id != eventargs.User.Id)))
+                    Reaction reaction = req.collected.First(x => x.Emoji == eventargs.Emoji && x.Users.Any(y => y.Id != eventargs.User.Id));
+                    req.collected.TryRemove(reaction);
+                    reaction.Users.Add(eventargs.User);
+                    req.collected.Add(reaction);
+                }
+                else
+                {
+                    req.collected.Add(new Reaction()
                     {
-                        var reaction = req._collected.First(x => x.Emoji == eventargs.Emoji && x.Users.Any(y => y.Id != eventargs.User.Id));
-                        req._collected.TryRemove(reaction);
-                        reaction.Users.Add(eventargs.User);
-                        req._collected.Add(reaction);
-                    }
-                    else
-                    {
-                        req._collected.Add(new Reaction()
-                        {
-                            Emoji = eventargs.Emoji,
-                            Users = new ConcurrentHashSet<DiscordUser>() { eventargs.User }
-                        });
-                    }
+                        Emoji = eventargs.Emoji,
+                        Users = [eventargs.User]
+                    });
                 }
             }
-            return Task.CompletedTask;
         }
+        return Task.CompletedTask;
+    }
 
-        private Task HandleReactionRemove(DiscordClient client, MessageReactionRemoveEventArgs eventargs)
+    private Task HandleReactionRemove(DiscordClient client, MessageReactionRemovedEventArgs eventargs)
+    {
+        // foreach request remove
+        foreach (ReactionCollectRequest req in this.requests)
         {
-            // foreach request remove
-            foreach (var req in this._requests)
+            if (req.message.Id == eventargs.Message.Id)
             {
-                if (req._message.Id == eventargs.Message.Id)
+                if (req.collected.Any(x => x.Emoji == eventargs.Emoji && x.Users.Any(y => y.Id == eventargs.User.Id)))
                 {
-                    if (req._collected.Any(x => x.Emoji == eventargs.Emoji && x.Users.Any(y => y.Id == eventargs.User.Id)))
+                    Reaction reaction = req.collected.First(x => x.Emoji == eventargs.Emoji && x.Users.Any(y => y.Id == eventargs.User.Id));
+                    req.collected.TryRemove(reaction);
+                    reaction.Users.TryRemove(eventargs.User);
+                    if (reaction.Users.Count > 0)
                     {
-                        var reaction = req._collected.First(x => x.Emoji == eventargs.Emoji && x.Users.Any(y => y.Id == eventargs.User.Id));
-                        req._collected.TryRemove(reaction);
-                        reaction.Users.TryRemove(eventargs.User);
-                        if (reaction.Users.Count > 0)
-                            req._collected.Add(reaction);
+                        req.collected.Add(reaction);
                     }
                 }
             }
-            return Task.CompletedTask;
         }
+        return Task.CompletedTask;
+    }
 
-        private Task HandleReactionClear(DiscordClient client, MessageReactionsClearEventArgs eventargs)
+    private Task HandleReactionClear(DiscordClient client, MessageReactionsClearedEventArgs eventargs)
+    {
+        // foreach request add
+        foreach (ReactionCollectRequest req in this.requests)
         {
-            // foreach request add
-            foreach (var req in this._requests)
+            if (req.message.Id == eventargs.Message.Id)
             {
-                if (req._message.Id == eventargs.Message.Id)
-                {
-                    req._collected.Clear();
-                }
+                req.collected.Clear();
             }
-            return Task.CompletedTask;
         }
-
-        ~ReactionCollector()
-        {
-            this.Dispose();
-        }
-
-        /// <summary>
-        /// Disposes this EventWaiter
-        /// </summary>
-        public void Dispose()
-        {
-            this._client = null;
-
-            this._reactionAddEvent.Unregister(this._reactionAddHandler);
-            this._reactionRemoveEvent.Unregister(this._reactionRemoveHandler);
-            this._reactionClearEvent.Unregister(this._reactionClearHandler);
-
-            this._reactionAddEvent = null;
-            this._reactionAddHandler = null;
-            this._reactionRemoveEvent = null;
-            this._reactionRemoveHandler = null;
-            this._reactionClearEvent = null;
-            this._reactionClearHandler = null;
-
-            this._requests.Clear();
-            this._requests = null;
-        }
+        return Task.CompletedTask;
     }
 
-    public class ReactionCollectRequest : IDisposable
+    /// <summary>
+    /// Disposes this EventWaiter
+    /// </summary>
+    public void Dispose()
     {
-        internal TaskCompletionSource<Reaction> _tcs;
-        internal CancellationTokenSource _ct;
-        internal TimeSpan _timeout;
-        internal DiscordMessage _message;
-        internal ConcurrentHashSet<Reaction> _collected;
+        this.requests.Clear();
 
-        public ReactionCollectRequest(DiscordMessage msg, TimeSpan timeout)
-        {
-            this._message = msg;
-            this._collected = new ConcurrentHashSet<Reaction>();
-            this._timeout = timeout;
-            this._tcs = new TaskCompletionSource<Reaction>();
-            this._ct = new CancellationTokenSource(this._timeout);
-            this._ct.Token.Register(() => this._tcs.TrySetResult(null));
-        }
-
-        ~ReactionCollectRequest()
-        {
-            this.Dispose();
-        }
-
-        public void Dispose()
-        {
-            GC.SuppressFinalize(this);
-            this._ct.Dispose();
-            this._tcs = null;
-            this._message = null;
-            this._collected?.Clear();
-            this._collected = null;
-        }
+        // Satisfy rule CA1816. Can be removed if this class is sealed.
+        GC.SuppressFinalize(this);
     }
+}
 
-    public class Reaction
+public class ReactionCollectRequest : IDisposable
+{
+    internal TaskCompletionSource<Reaction> tcs;
+    internal CancellationTokenSource ct;
+    internal TimeSpan timeout;
+    internal DiscordMessage message;
+    internal ConcurrentHashSet<Reaction> collected;
+
+    public ReactionCollectRequest(DiscordMessage msg, TimeSpan timeout)
     {
-        public DiscordEmoji Emoji { get; internal set; }
-        public ConcurrentHashSet<DiscordUser> Users { get; internal set; }
-        public int Total => this.Users.Count;
+        this.message = msg;
+        this.collected = [];
+        this.timeout = timeout;
+        this.tcs = new TaskCompletionSource<Reaction>();
+        this.ct = new CancellationTokenSource(this.timeout);
+        this.ct.Token.Register(() => this.tcs.TrySetResult(null));
     }
+
+    public void Dispose()
+    {
+        this.ct.Dispose();
+        this.collected.Clear();
+
+        // Satisfy rule CA1816. Can be removed if this class is sealed.
+        GC.SuppressFinalize(this);
+    }
+}
+
+public class Reaction
+{
+    public DiscordEmoji Emoji { get; internal set; }
+    public ConcurrentHashSet<DiscordUser> Users { get; internal set; }
+    public int Total => this.Users.Count;
 }

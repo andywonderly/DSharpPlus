@@ -3,7 +3,11 @@ uid: articles.preamble
 title: Article Preamble
 ---
 
+>[!NOTE]
+> These articles and the [API documentation][11] are built for the latest [nightly][18] version (`v5.0`)
+
 ## Knowledge Prerequisites
+
 Before attempting to write a Discord bot, you should be familiar with the concepts of [Object Oriented Programing][0],
 [the C# programming language][1], and [Task-based Asynchronous Pattern][2].
 
@@ -15,25 +19,36 @@ go through all the basics, from setting up your development environment up to so
 you're not sure what to do first, Bob's tutorial series should be your starting point!
 
 ## Supported .NET Implementations
-Because DSharpPlus targets .NET Standard 2.0, there are many implementations that may function with DSharpPlus. However,
-there are only a few versions we will *explicitly* provide support for.
 
-Implementation      | Support | Notes
-:------------------:|:-------:|:------
-[.NET][4]      | ✔️      | EoL versions Core 3.1 and 5.0 should work; LTS version 6.0 and STS version 7.0 are supported.
-[.NET Framework][5] | ⚠️      | Versions 4.6.1 through 4.8 *should* work fine. However, we do not directly support .NET Framework. We recommend that you use the latest or LTS version of .NET Core.
-[Mono][6]           | ❌️       | Has numerous flaws which can break things without warning. If you need a cross platform runtime, use .NET.
-[Unity][7]          | ❌️       | Game engines with C# support will never be supported by DSharpPlus. You should consider using the official [Discord GameSDK][8] instead.
+There are multiple different branches of DSharpPlus targeting different [.NET][4] versions.
 
-If you use an unsupported implementation and encounter issues, you'll be on your own.
+See the table below for supported [.NET implementations][16]:
+
+| DSharpPlus Branch | .NET | .NET Core | .NET Framework |
+| :---------- | :-----: | :-----: | :-----: | 
+| [Stable][17], `v4.5.X` | `v8.0` - `v9.0`</br>✔️ |  `v3.1`</br>⚠️ | `v4.6.1` - `v4.8.1`</br>⚠️ |
+| [Nightly][18], `v5.0` | `v9.0`</br>✔️ | ❌ | ❌ |
+| [Future][19], `v6.0` | `v10.0`</br>✔️ | ❌ | ❌ |
+
+<sub> ✔️ `Recommended and supported`  &nbsp;●&nbsp; ⚠️ `Unsupported, might still work` &nbsp;●&nbsp; ❌ `Unsupported, do not use`</sub>
+
+Generally, you should be targeting the latest version of .NET.
+
+.NET Core and [.NET Framework][5] are not directly targeted by DSharpPlus, but may work in some senarios because of the [.NET Standard][20].
+
+Using [Unity][7], [Mono][6], [.NET Framework][5], or any other .NET implementation other than the ones listed with a `✔️` above are _not_ supported by DSharpPlus, and you will be on your own regarding any arising issues.
+
+If you are using a game engine with C# support (such as [Unity][7]), you should consider using the [Discord GameSDK][8] instead of DSharpPlus. 
 
 ## Getting Started
+
 If you're writing a Discord bot for the first time, you'll want to start with [creating a bot account][9]. Otherwise, if
 you have a bot account already, start off with the [writing your first bot][10] article.
 
 Once you're up and running, feel free to browse through the [API Documentation][11]!
 
 ## Support and Questions
+
 You can get in contact with us on Discord through one of the following guilds:
 
 **DSharpPlus Guild**:</br>
@@ -60,3 +75,8 @@ You can get in contact with us on Discord through one of the following guilds:
 [13]: https://discord.gg/dsharpplus
 [14]: https://discordapp.com/api/guilds/81384788765712384/embed.png?style=banner2
 [15]: https://discord.gg/discord-api
+[16]: https://learn.microsoft.com/en-us/dotnet/fundamentals/implementations
+[17]: https://github.com/DSharpPlus/DSharpPlus/tree/release/4.5
+[18]: https://github.com/DSharpPlus/DSharpPlus/tree/master
+[19]: https://github.com/DSharpPlus/DSharpPlus/tree/v6
+[20]: https://learn.microsoft.com/en-us/dotnet/standard/net-standard
